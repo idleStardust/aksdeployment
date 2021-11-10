@@ -1,0 +1,63 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    
+    - uses: actions/checkout@master
+    
+    - uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Create ACR
+      id: create-acr
+      run: |
+        az acr create -n appexample -g appexample8262-rg --location "South Central US" --sku Basic --admin-enabled
+        echo "::set-output name=acr_username::`az acr credential show -n appexample --query username | xargs`"
+        echo "::set-output name=acr_password::`az acr credential show -n appexample --query passwords[0].value | xargs`"
+        echo "::add-mask::`az acr credential show -n appexample --query passwords[0].value | xargs`"
+
+    - uses: azure/docker-login@v1
+      with:
+        login-server: appexample.azurecr.io
+        username: ${{ steps.create-acr.outputs.acr_username }}
+        password: ${{ steps.create-acr.outputs.acr_password }}
+
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/app" -f  "app/Dockerfile" -t appexample.azurecr.io/ziplab:${{ github.sha }} --label dockerfile-path=app/Dockerfile
+        docker push appexample.azurecr.io/ziplab:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      id: login
+      with:
+         kubeconfig: ${{ secrets.aks_ziplab_kubeConfig }}
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep ziplabad09 | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace ziplabad09`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: ziplabad09
+        container-registry-url: appexample.azurecr.io
+        container-registry-username: ${{ steps.create-acr.outputs.acr_username }}
+        container-registry-password: ${{ steps.create-acr.outputs.acr_password }}
+        secret-name: ziplabdockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: ziplabad09
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+        images: |
+          appexample.azurecr.io/ziplab:${{ github.sha }}
+        imagepullsecrets: |
+          ziplabdockerauth   
