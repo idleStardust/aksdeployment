@@ -1,0 +1,19 @@
+apiVersion : apps/v1
+kind: Deployment
+metadata:
+  name: "ziplab-f68d"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: "ziplab-f68d"
+  template:
+    metadata:
+      labels:
+        app: "ziplab-f68d"
+    spec:
+      containers:
+        - name: "ziplab-f68d"
+          image: "appexample.azurecr.io/ziplab"
+          ports:
+          - containerPort: 80
